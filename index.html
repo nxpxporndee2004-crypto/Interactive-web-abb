@@ -1,0 +1,2001 @@
+<!DOCTYPE html>
+<html lang="th" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amazon Sales Intelligence Dashboard | วิเคราะห์และเปรียบเทียบ Category & Discount</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0284c7',
+              600: '#0369a1',
+              700: '#075985',
+            },
+            accent: {
+              500: '#f59e0b',
+              600: '#d97706',
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- PapaParse CDN for robust CSV parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Load Sample Data as default fallback -->
+  <script src="sample_data.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Noto+Sans+Thai:wght@300;400;500;600;700&display=swap');
+    
+    body {
+      font-family: 'Plus Jakarta Sans', 'Noto Sans Thai', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+
+    .glass-card {
+      background: rgba(30, 41, 59, 0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-card-hover {
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .glass-card-hover:hover {
+      transform: translateY(-2px);
+      border-color: rgba(56, 189, 248, 0.3);
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+    .gradient-text {
+      background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #c084fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .badge-glow {
+      box-shadow: 0 0 15px -3px rgba(56, 189, 248, 0.4);
+    }
+  </style>
+</head>
+
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased flex flex-col selection:bg-sky-500 selection:text-white">
+
+  <!-- Top Notification / Status Banner (Dynamic) -->
+  <div id="statusBanner" class="bg-sky-900/60 border-b border-sky-500/30 px-4 py-2 text-xs md:text-sm text-sky-200 flex items-center justify-between transition-all duration-300">
+    <div class="flex items-center gap-2 max-w-4xl truncate">
+      <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+      <span id="statusText">กำลังโหลดข้อมูล...</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <label class="cursor-pointer bg-sky-500 hover:bg-sky-600 text-white font-medium px-3 py-1 rounded-lg text-xs flex items-center gap-1.5 transition shadow">
+        <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+        <span>เลือกไฟล์ CSV อื่น</span>
+        <input type="file" id="csvFileInput" accept=".csv" class="hidden">
+      </label>
+      <button onclick="document.getElementById('statusBanner').style.display='none'" class="text-sky-300 hover:text-white">
+        <i data-lucide="x" class="w-4 h-4"></i>
+      </button>
+    </div>
+  </div>
+
+  <!-- Main Navigation Header -->
+  <header class="glass-card sticky top-0 z-40 border-b border-slate-800 bg-slate-900/90 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      
+      <!-- Logo & Title -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-500/20">
+          <i data-lucide="bar-chart-3" class="w-5 h-5 text-white"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="font-bold text-lg text-white tracking-tight">Sales Analytics & Discount Radar</h1>
+            <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">Pro</span>
+          </div>
+          <p class="text-xs text-slate-400">เปรียบเทียบ Category สินค้า และอัตราส่วนลด (Discount Percentage)</p>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="flex items-center gap-2">
+        <button id="quickSampleBtn" onclick="loadSampleDataDirectly()" class="hidden text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
+          <i data-lucide="database" class="w-3.5 h-3.5"></i>
+          <span>ดูข้อมูลตัวอย่าง</span>
+        </button>
+
+        <button onclick="exportCurrentDataCSV()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg border border-slate-700 transition flex items-center gap-1.5">
+          <i data-lucide="download" class="w-3.5 h-3.5"></i>
+          <span class="hidden sm:inline">ส่งออกข้อมูล</span> (CSV)
+        </button>
+        
+        <button onclick="window.print()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 p-2 rounded-lg border border-slate-700 transition" title="พิมพ์หน้านี้ / บันทึก PDF">
+          <i data-lucide="printer" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Page Container -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full space-y-6">
+
+    <!-- KPI Summary Row -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
+      
+      <!-- Total Products -->
+      <div class="glass-card rounded-2xl p-4 glass-card-hover relative overflow-hidden">
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-medium text-slate-400">สินค้าทั้งหมด</span>
+          <div class="w-8 h-8 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center">
+            <i data-lucide="package" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="text-2xl font-bold text-white tracking-tight" id="kpiTotalProducts">-</div>
+        <div class="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+          <span class="text-sky-400 font-semibold" id="kpiCategoryCount">-</span> หมวดหมู่ย่อย
+        </div>
+        <div class="absolute -right-3 -bottom-3 w-16 h-16 bg-sky-500/5 rounded-full blur-xl"></div>
+      </div>
+
+      <!-- Average Discount -->
+      <div class="glass-card rounded-2xl p-4 glass-card-hover relative overflow-hidden">
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-medium text-slate-400">ส่วนลดเฉลี่ยรวม</span>
+          <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
+            <i data-lucide="percent" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="text-2xl font-bold text-amber-400 tracking-tight" id="kpiAvgDiscount">- %</div>
+        <div class="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+          มัธยฐาน: <span class="text-slate-200 font-semibold" id="kpiMedianDiscount">- %</span>
+        </div>
+        <div class="absolute -right-3 -bottom-3 w-16 h-16 bg-amber-500/5 rounded-full blur-xl"></div>
+      </div>
+
+      <!-- Top Discount Category -->
+      <div class="glass-card rounded-2xl p-4 glass-card-hover relative overflow-hidden">
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-medium text-slate-400">หมวดลดเยอะที่สุด</span>
+          <div class="w-8 h-8 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
+            <i data-lucide="flame" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="text-lg font-bold text-rose-300 truncate tracking-tight" id="kpiTopCategory">-</div>
+        <div class="text-[11px] text-rose-400 font-semibold mt-1" id="kpiTopCategoryRate">- % ส่วนลดเฉลี่ย</div>
+        <div class="absolute -right-3 -bottom-3 w-16 h-16 bg-rose-500/5 rounded-full blur-xl"></div>
+      </div>
+
+      <!-- Average Savings -->
+      <div class="glass-card rounded-2xl p-4 glass-card-hover relative overflow-hidden">
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-medium text-slate-400">ประหยัดเฉลี่ย/ชิ้น</span>
+          <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+            <i data-lucide="wallet" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="text-2xl font-bold text-emerald-400 tracking-tight" id="kpiAvgSavings">₹ -</div>
+        <div class="text-[11px] text-slate-400 mt-1 truncate" id="kpiTotalDiscountValue">
+          ส่วนลดรวม: ₹ -
+        </div>
+        <div class="absolute -right-3 -bottom-3 w-16 h-16 bg-emerald-500/5 rounded-full blur-xl"></div>
+      </div>
+
+      <!-- Average Rating -->
+      <div class="glass-card rounded-2xl p-4 glass-card-hover relative overflow-hidden col-span-2 md:col-span-1">
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-medium text-slate-400">คะแนนเฉลี่ยสินค้า</span>
+          <div class="w-8 h-8 rounded-lg bg-violet-500/10 text-violet-400 flex items-center justify-center">
+            <i data-lucide="star" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="text-2xl font-bold text-violet-300 tracking-tight flex items-baseline gap-1" id="kpiAvgRating">
+          <span>-</span> <span class="text-xs font-normal text-slate-400">/ 5.0</span>
+        </div>
+        <div class="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+          <span class="text-slate-200 font-semibold" id="kpiTotalReviews">-</span> รีวิวทั้งหมด
+        </div>
+        <div class="absolute -right-3 -bottom-3 w-16 h-16 bg-violet-500/5 rounded-full blur-xl"></div>
+      </div>
+
+    </div>
+
+    <!-- Tab Bar -->
+    <div class="flex border-b border-slate-800 gap-2 overflow-x-auto pb-1">
+      <button onclick="switchTab('compare')" id="tabBtn-compare" class="tab-btn active px-4 py-2.5 rounded-t-xl text-sm font-semibold flex items-center gap-2 border-b-2 border-sky-400 text-sky-400 bg-sky-500/10 transition">
+        <i data-lucide="git-compare" class="w-4 h-4"></i>
+        <span>เปรียบเทียบ Category & ส่วนลด (Comparison Studio)</span>
+      </button>
+
+      <button onclick="switchTab('leaderboard')" id="tabBtn-leaderboard" class="tab-btn px-4 py-2.5 rounded-t-xl text-sm font-semibold flex items-center gap-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition">
+        <i data-lucide="trophy" class="w-4 h-4"></i>
+        <span>อันดับส่วนลด & วิเคราะห์เชิงลึก (Leaderboard)</span>
+      </button>
+
+      <button onclick="switchTab('explorer')" id="tabBtn-explorer" class="tab-btn px-4 py-2.5 rounded-t-xl text-sm font-semibold flex items-center gap-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition">
+        <i data-lucide="search" class="w-4 h-4"></i>
+        <span>สำรวจรายการสินค้า (Product Explorer)</span>
+      </button>
+
+      <button onclick="switchTab('upload')" id="tabBtn-upload" class="tab-btn px-4 py-2.5 rounded-t-xl text-sm font-semibold flex items-center gap-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition">
+        <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+        <span>จัดการไฟล์ CSV</span>
+      </button>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 1: CATEGORY COMPARISON STUDIO (MAIN) -->
+    <!-- ========================================== -->
+    <div id="tabContent-compare" class="tab-content space-y-6">
+      
+      <!-- Comparison Controller Box -->
+      <div class="glass-card rounded-2xl p-5 border border-sky-500/20 bg-gradient-to-r from-slate-900 via-sky-950/20 to-slate-900">
+        
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+          <div>
+            <h2 class="text-base md:text-lg font-bold text-white flex items-center gap-2">
+              <i data-lucide="layers" class="w-5 h-5 text-sky-400"></i>
+              <span>เลือกหมวดหมู่ที่ต้องการเปรียบเทียบ (Category Multi-Select)</span>
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5">เลือกหมวดหมู่ 2 หมวดขึ้นไป เพื่อดูการกระจายตัวของ Discount %, ราคา, และคะแนนความพึงพอใจแบบเทียบเคียง</p>
+          </div>
+
+          <!-- Hierarchy Level Switcher -->
+          <div class="flex items-center gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs self-start md:self-auto">
+            <span class="text-slate-400 px-2 font-medium">ระดับหมวดหมู่:</span>
+            <button onclick="setCategoryLevel('main')" id="lvlBtn-main" class="px-3 py-1 rounded-lg font-semibold bg-sky-500 text-white shadow transition">
+              Main Category
+            </button>
+            <button onclick="setCategoryLevel('sub')" id="lvlBtn-sub" class="px-3 py-1 rounded-lg font-medium text-slate-400 hover:text-white transition">
+              Sub Category
+            </button>
+          </div>
+        </div>
+
+        <!-- Category Selector Chips -->
+        <div class="pt-4 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-slate-300">คลิกที่หมวดหมู่เพื่อเปิด/ปิดการเปรียบเทียบ:</span>
+            <div class="flex items-center gap-2 text-xs">
+              <button onclick="selectAllCategoriesToCompare()" class="text-sky-400 hover:underline font-medium">เลือกทั้งหมด</button>
+              <span class="text-slate-600">|</span>
+              <button onclick="clearComparisonSelection()" class="text-slate-400 hover:text-slate-200 font-medium">ล้างการเลือก</button>
+            </div>
+          </div>
+          <div id="categoryChipsContainer" class="flex flex-wrap gap-2 pt-1 max-h-36 overflow-y-auto pr-1">
+            <!-- Dynamic Chips inserted by JS -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Side-by-Side Category Metric Cards -->
+      <div id="comparisonMetricCards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <!-- Rendered by JS -->
+      </div>
+
+      <!-- Visual Charts Grid (Row 1) -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        <!-- Chart 1: Average & Max Discount Comparison -->
+        <div class="glass-card rounded-2xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h3 class="font-bold text-white text-sm flex items-center gap-2">
+                <i data-lucide="bar-chart-2" class="w-4 h-4 text-sky-400"></i>
+                <span>เปรียบเทียบอัตราส่วนลดเฉลี่ย & สูงสุด (%)</span>
+              </h3>
+              <p class="text-xs text-slate-400">Average vs Max Discount Percentage per Category</p>
+            </div>
+            <span class="text-[11px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">Bar Chart</span>
+          </div>
+          <div class="h-72 relative">
+            <canvas id="categoryDiscountBarChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Chart 2: Discount Tier Breakdown (0-20%, 20-40%, 40-60%, 60-80%, 80-100%) -->
+        <div class="glass-card rounded-2xl p-5">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h3 class="font-bold text-white text-sm flex items-center gap-2">
+                <i data-lucide="pie-chart" class="w-4 h-4 text-amber-400"></i>
+                <span>สัดส่วนช่วงส่วนลดในแต่ละหมวด (Discount Tiers %)</span>
+              </h3>
+              <p class="text-xs text-slate-400">Proportion of items in each discount range (Stacked %)</p>
+            </div>
+            <span class="text-[11px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">Distribution</span>
+          </div>
+          <div class="h-72 relative">
+            <canvas id="discountTierChart"></canvas>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Visual Charts Grid (Row 2) -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- Chart 3: Radar Spider Benchmark -->
+        <div class="glass-card rounded-2xl p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h3 class="font-bold text-white text-sm flex items-center gap-2">
+                <i data-lucide="radar" class="w-4 h-4 text-violet-400"></i>
+                <span>เรดาร์เปรียบเทียบมิติต่างๆ (Radar Benchmark)</span>
+              </h3>
+              <p class="text-xs text-slate-400">Discount %, Rating, Price & Volume Index</p>
+            </div>
+            <span class="text-[11px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-lg border border-slate-700">Radar</span>
+          </div>
+          <div class="h-72 relative flex items-center justify-center">
+            <canvas id="categoryRadarChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Chart 4: Price vs Discount % Scatter Plot (2 columns wide) -->
+        <div class="glass-card rounded-2xl p-5 lg:col-span-2">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h3 class="font-bold text-white text-sm flex items-center gap-2">
+                <i data-lucide="scatter-chart" class="w-4 h-4 text-emerald-400"></i>
+                <span>การกระจายตัวของราคาเดิม vs อัตราส่วนลด (Price vs Discount Scatter)</span>
+              </h3>
+              <p class="text-xs text-slate-400">แกน X: Actual Price (₹) | แกน Y: Discount Percentage (%) | สีแยกตามหมวดหมู่</p>
+            </div>
+            <span class="text-[11px] bg-slate-800 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700">Scatter</span>
+          </div>
+          <div class="h-72 relative">
+            <canvas id="priceDiscountScatterChart"></canvas>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Top Bargain Spotlight per Category -->
+      <div class="glass-card rounded-2xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="font-bold text-white text-sm md:text-base flex items-center gap-2">
+              <i data-lucide="tag" class="w-4 h-4 text-rose-400"></i>
+              <span>สินค้าที่ลดราคาแรงที่สุดในแต่ละหมวดหมู่ (Top Bargain Spotlight)</span>
+            </h3>
+            <p class="text-xs text-slate-400">สินค้าราคาดีที่สุด (Highest Discount Item) ของแต่ละหมวดที่เลือก</p>
+          </div>
+        </div>
+        <div id="topBargainsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+
+      <!-- Direct Head-to-Head Comparison Matrix Table -->
+      <div class="glass-card rounded-2xl p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <h3 class="font-bold text-white text-sm md:text-base flex items-center gap-2">
+              <i data-lucide="table-2" class="w-4 h-4 text-sky-400"></i>
+              <span>ตารางเปรียบเทียบสถิติหมวดหมู่แบบละเอียด (Category Matrix)</span>
+            </h3>
+            <p class="text-xs text-slate-400">สรุปข้อมูลเชิงตัวเลขเปรียบเทียบครบทุกมิติ พร้อมความต่างจากค่าเฉลี่ยรวม</p>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-900/90 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+              <tr>
+                <th class="p-3">หมวดหมู่ (Category)</th>
+                <th class="p-3 text-right">จำนวนสินค้า</th>
+                <th class="p-3 text-right">ส่วนลดเฉลี่ย (%)</th>
+                <th class="p-3 text-right">มัธยฐาน (%)</th>
+                <th class="p-3 text-right">ส่วนลดสูงสุด (%)</th>
+                <th class="p-3 text-right">ราคาเดิมเฉลี่ย (₹)</th>
+                <th class="p-3 text-right">ราคาลดเฉลี่ย (₹)</th>
+                <th class="p-3 text-right">ประหยัดเฉลี่ย (₹)</th>
+                <th class="p-3 text-right">คะแนนเฉลี่ย</th>
+              </tr>
+            </thead>
+            <tbody id="comparisonTableBody" class="divide-y divide-slate-800/60 font-medium">
+              <!-- Rendered by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 2: LEADERBOARD & DEEP ANALYTICS -->
+    <!-- ========================================== -->
+    <div id="tabContent-leaderboard" class="tab-content space-y-6 hidden">
+      
+      <!-- Leaderboard Header Chart -->
+      <div class="glass-card rounded-2xl p-5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <div>
+            <h3 class="font-bold text-white text-base flex items-center gap-2">
+              <i data-lucide="trophy" class="w-5 h-5 text-amber-400"></i>
+              <span>ตารางอันดับส่วนลดเฉลี่ยทุกหมวดหมู่ (Category Discount Ranking)</span>
+            </h3>
+            <p class="text-xs text-slate-400">จัดอันดับหมวดหมู่ที่ให้ส่วนลดสูงที่สุดไปหาน้อยที่สุดในฐานข้อมูล</p>
+          </div>
+          <div class="text-xs text-slate-400 flex items-center gap-2">
+            <span>เรียงตาม:</span>
+            <span class="px-2.5 py-1 rounded-lg bg-sky-500/20 text-sky-300 border border-sky-500/30 font-semibold">
+              ส่วนลดเฉลี่ย (สูง -> ต่ำ)
+            </span>
+          </div>
+        </div>
+        <div class="h-96 relative">
+          <canvas id="allCategoriesRankingChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Additional Insights Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        <!-- Price Range vs Discount Rate -->
+        <div class="glass-card rounded-2xl p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h4 class="font-bold text-white text-sm flex items-center gap-2">
+                <i data-lucide="badge-dollar-sign" class="w-4 h-4 text-emerald-400"></i>
+                <span>ระดับราคากับอัตราส่วนลด (Price Tiers vs Discount %)</span>
+              </h4>
+              <p class="text-xs text-slate-400">สินค้าราคาถูก vs ราคาแพง ใครลดมากกว่ากัน?</p>
+            </div>
+          </div>
+          <div class="h-64 relative">
+            <canvas id="priceRangeDiscountChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Rating vs Discount Rate -->
+        <div class="glass-card rounded-2xl p-5">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h4 class="font-bold text-white text-sm flex items-center gap-2">
+                <i data-lucide="star-half" class="w-4 h-4 text-violet-400"></i>
+                <span>ความสัมพันธ์: คะแนนรีวิว vs ส่วนลด (%)</span>
+              </h4>
+              <p class="text-xs text-slate-400">สินค้าลดราคาหนัก ได้คะแนนรีวิวดีหรือแย่กว่า?</p>
+            </div>
+          </div>
+          <div class="h-64 relative">
+            <canvas id="ratingVsDiscountChart"></canvas>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 3: PRODUCT EXPLORER & FILTER STUDIO -->
+    <!-- ========================================== -->
+    <div id="tabContent-explorer" class="tab-content space-y-6 hidden">
+      
+      <!-- Filter Controls Bar -->
+      <div class="glass-card rounded-2xl p-5 space-y-4">
+        
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+          <div class="flex items-center gap-2">
+            <i data-lucide="filter" class="w-4 h-4 text-sky-400"></i>
+            <h3 class="font-bold text-white text-sm">ตัวกรองข้อมูลสินค้า (Interactive Filters)</h3>
+          </div>
+          <button onclick="resetFilters()" class="text-xs text-sky-400 hover:text-sky-300 font-semibold flex items-center gap-1 transition">
+            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+            <span>รีเซ็ตตัวกรองทั้งหมด</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+          
+          <!-- Search Input -->
+          <div>
+            <label class="block text-slate-400 font-medium mb-1.5">ค้นหาชื่อสินค้า (Keyword)</label>
+            <div class="relative">
+              <input type="text" id="filterSearch" placeholder="พิมพ์ชื่อสินค้า เช่น Cable, TV, Fan..." 
+                oninput="applyFiltersAndRenderTable()" 
+                class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-sky-500">
+              <i data-lucide="search" class="w-4 h-4 text-slate-500 absolute right-3 top-2.5"></i>
+            </div>
+          </div>
+
+          <!-- Category Filter -->
+          <div>
+            <label class="block text-slate-400 font-medium mb-1.5">กรองตามหมวดหมู่ (Category)</label>
+            <select id="filterCategory" onchange="applyFiltersAndRenderTable()" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500">
+              <option value="ALL">ทั้งหมด (All Categories)</option>
+            </select>
+          </div>
+
+          <!-- Min Discount Slider -->
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <label class="text-slate-400 font-medium">ส่วนลดขั้นต่ำ:</label>
+              <span id="filterDiscountVal" class="text-amber-400 font-bold">0%</span>
+            </div>
+            <input type="range" id="filterDiscountMin" min="0" max="90" step="5" value="0" 
+              oninput="document.getElementById('filterDiscountVal').innerText = this.value + '%'; applyFiltersAndRenderTable();" 
+              class="w-full accent-amber-500 cursor-pointer">
+          </div>
+
+          <!-- Min Rating Filter -->
+          <div>
+            <div class="flex justify-between items-center mb-1.5">
+              <label class="text-slate-400 font-medium">คะแนนรีวิวขั้นต่ำ:</label>
+              <span id="filterRatingVal" class="text-violet-400 font-bold">0.0 ★</span>
+            </div>
+            <input type="range" id="filterRatingMin" min="0" max="4.8" step="0.2" value="0" 
+              oninput="document.getElementById('filterRatingVal').innerText = Number(this.value).toFixed(1) + ' ★'; applyFiltersAndRenderTable();" 
+              class="w-full accent-violet-500 cursor-pointer">
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Products Table View -->
+      <div class="glass-card rounded-2xl p-5">
+        
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div class="flex items-center gap-2">
+            <h3 class="font-bold text-white text-sm md:text-base">รายการสินค้าที่ตรงตามเงื่อนไข</h3>
+            <span id="filteredCountBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 font-semibold border border-sky-500/30">
+              0 รายการ
+            </span>
+          </div>
+
+          <!-- Sorting Selector -->
+          <div class="flex items-center gap-2 text-xs">
+            <span class="text-slate-400 font-medium">เรียงตาม:</span>
+            <select id="tableSortBy" onchange="applyFiltersAndRenderTable()" class="bg-slate-900 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-sky-500">
+              <option value="discount_desc">ส่วนลดสูงสุด (Discount % มาก -> น้อย)</option>
+              <option value="discount_asc">ส่วนลดน้อยสุด (Discount % น้อย -> มาก)</option>
+              <option value="price_asc">ราคาขายถูกสุด (Price ต่ำ -> สูง)</option>
+              <option value="price_desc">ราคาขายแพงสุด (Price สูง -> ต่ำ)</option>
+              <option value="rating_desc">คะแนนรีวิวสูงสุด (Rating สูงสุด)</option>
+              <option value="reviews_desc">จำนวนรีวิวมากสุด (Popularity)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Table Container -->
+        <div class="overflow-x-auto rounded-xl border border-slate-800">
+          <table class="w-full text-left text-xs text-slate-300">
+            <thead class="bg-slate-900 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+              <tr>
+                <th class="p-3 w-16 text-center">รูป</th>
+                <th class="p-3">ชื่อสินค้า (Product Title)</th>
+                <th class="p-3">หมวดหมู่ (Category)</th>
+                <th class="p-3 text-right">ราคาเดิม (MRP)</th>
+                <th class="p-3 text-right">ราคาพิเศษ</th>
+                <th class="p-3 text-center">ส่วนลด (%)</th>
+                <th class="p-3 text-center">คะแนน</th>
+                <th class="p-3 text-center">ลิงก์</th>
+              </tr>
+            </thead>
+            <tbody id="productTableBody" class="divide-y divide-slate-800/60 font-normal">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Table Pagination Controls -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 pt-3 border-t border-slate-800 text-xs text-slate-400">
+          <div id="paginationInfo">แสดง 0 ถึง 0 จาก 0 รายการ</div>
+          <div class="flex items-center gap-2">
+            <button onclick="prevPage()" id="btnPrevPage" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition">
+              ก่อนหน้า
+            </button>
+            <span id="currentPageDisplay" class="font-semibold text-white px-2">1</span>
+            <button onclick="nextPage()" id="btnNextPage" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition">
+              ถัดไป
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+    <!-- ========================================== -->
+    <!-- TAB 4: DATA SOURCE & CSV MANAGER -->
+    <!-- ========================================== -->
+    <div id="tabContent-upload" class="tab-content space-y-6 hidden">
+      
+      <div class="glass-card rounded-2xl p-6 space-y-6 max-w-3xl mx-auto">
+        <div class="text-center space-y-2">
+          <div class="w-12 h-12 rounded-2xl bg-sky-500/20 text-sky-400 flex items-center justify-center mx-auto mb-2">
+            <i data-lucide="folder-up" class="w-6 h-6"></i>
+          </div>
+          <h3 class="text-lg font-bold text-white">จัดการและนำเข้าไฟล์ข้อมูล CSV</h3>
+          <p class="text-xs text-slate-400">คุณสามารถลากไฟล์ <code>amazon.csv</code> หรือไฟล์ข้อมูลขายอื่นๆ มาวางที่นี่เพื่อโหลดข้อมูลทั้งหมด 100%</p>
+        </div>
+
+        <!-- Drag & Drop Zone -->
+        <div id="dropZone" class="border-2 border-dashed border-sky-500/40 hover:border-sky-400 rounded-2xl p-8 text-center cursor-pointer bg-slate-900/50 hover:bg-slate-900 transition space-y-3">
+          <i data-lucide="cloud-upload" class="w-10 h-10 text-sky-400 mx-auto"></i>
+          <div class="text-sm font-semibold text-white">คลิกเพื่อเลือกไฟล์ หรือลากไฟล์ .CSV มาวางที่นี่</div>
+          <p class="text-xs text-slate-500">รองรับไฟล์ CSV ที่มีคอลัมน์ category, discounted_price, actual_price, discount_percentage ฯลฯ</p>
+          <input type="file" id="dropZoneInput" accept=".csv" class="hidden">
+        </div>
+
+        <!-- Current File Stats Card -->
+        <div class="bg-slate-900/80 rounded-xl p-4 border border-slate-800 space-y-2 text-xs">
+          <div class="font-semibold text-white flex items-center gap-2">
+            <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400"></i>
+            <span>สถานะชุดข้อมูลปัจจุบัน (Current Dataset Status)</span>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-slate-300 pt-1">
+            <div>แหล่งข้อมูล: <span id="metaSource" class="font-bold text-sky-400">-</span></div>
+            <div>จำนวนแถว: <span id="metaRows" class="font-bold text-emerald-400">-</span> รายการ</div>
+            <div>จำนวนหมวดหมู่: <span id="metaCategories" class="font-bold text-amber-400">-</span> หมวด</div>
+          </div>
+        </div>
+
+        <!-- Help Notice -->
+        <div class="text-xs text-slate-400 space-y-1 bg-slate-950 p-4 rounded-xl border border-slate-800/80">
+          <div class="font-semibold text-slate-300 flex items-center gap-1.5">
+            <i data-lucide="info" class="w-4 h-4 text-sky-400"></i>
+            <span>คำแนะนำการใช้งาน:</span>
+          </div>
+          <p>• หากเปิดไฟล์ <code>index.html</code> โดยตรงผ่าน <code>file:///</code> เบราว์เซอร์อาจติดความปลอดภัย CORS ไม่ให้ดึงไฟล์ <code>amazon.csv</code> อัตโนมัติ</p>
+          <p>• เพียงคลิกปุ่ม <strong>"เลือกไฟล์ CSV อื่น"</strong> ด้านบน หรือลากไฟล์ <code>amazon.csv</code> มาวางที่กล่องด้านบน ข้อมูลจะโหลดครบ 1,465 รายการทันทีโดยไม่ต้องติดตั้งโปรแกรมใดๆ เพิ่มเติมครับ!</p>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-slate-800/60 bg-slate-950/80 text-center py-4 text-xs text-slate-500">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <div>Interactive Sales & Discount Dashboard — Amazon Dataset Analyzer</div>
+      <div>Designed for Category & Discount Comparison Intelligence</div>
+    </div>
+  </footer>
+
+  <!-- ============================================================ -->
+  <!-- JAVASCRIPT APPLICATION CORE LOGIC                           -->
+  <!-- ============================================================ -->
+  <script>
+    // --- Global State ---
+    let rawDataset = [];
+    let processedData = [];
+    let activeCategoryLevel = 'main'; // 'main' or 'sub'
+    let selectedCategoriesForCompare = [];
+    let currentFilteredProducts = [];
+    let currentPage = 1;
+    const pageSize = 15;
+
+    // Chart Instances holder for clean destruction & re-rendering
+    let charts = {
+      compareBar: null,
+      tierBar: null,
+      radar: null,
+      scatter: null,
+      allRanking: null,
+      priceTier: null,
+      ratingCorr: null
+    };
+
+    // Color Palette for categories
+    const categoryColors = [
+      { border: '#38bdf8', bg: 'rgba(56, 189, 248, 0.25)', solid: '#38bdf8' }, // sky
+      { border: '#f59e0b', bg: 'rgba(245, 158, 11, 0.25)', solid: '#f59e0b' }, // amber
+      { border: '#10b981', bg: 'rgba(16, 185, 129, 0.25)', solid: '#10b981' }, // emerald
+      { border: '#a855f7', bg: 'rgba(168, 85, 247, 0.25)', solid: '#a855f7' }, // purple
+      { border: '#f43f5e', bg: 'rgba(244, 63, 94, 0.25)', solid: '#f43f5e' },  // rose
+      { border: '#06b6d4', bg: 'rgba(6, 182, 212, 0.25)', solid: '#06b6d4' },  // cyan
+      { border: '#eab308', bg: 'rgba(234, 179, 8, 0.25)', solid: '#eab308' },  // yellow
+      { border: '#ec4899', bg: 'rgba(236, 72, 153, 0.25)', solid: '#ec4899' }, // pink
+    ];
+
+    // Helper: Clean Price Value
+    function cleanPrice(val) {
+      if (val === undefined || val === null) return 0;
+      const str = String(val).replace(/[^0-9.]/g, '');
+      const parsed = parseFloat(str);
+      return isNaN(parsed) ? 0 : parsed;
+    }
+
+    // Helper: Clean Discount %
+    function cleanDiscount(val, actual, disc) {
+      if (val !== undefined && val !== null) {
+        const str = String(val).replace(/[^0-9.]/g, '');
+        const parsed = parseFloat(str);
+        if (!isNaN(parsed) && parsed >= 0) return parsed;
+      }
+      if (actual > 0 && disc > 0 && actual > disc) {
+        return Math.round(((actual - disc) / actual) * 100);
+      }
+      return 0;
+    }
+
+    // Helper: Clean Rating
+    function cleanRating(val) {
+      if (!val) return 0;
+      const parsed = parseFloat(val);
+      return (isNaN(parsed) || parsed < 0 || parsed > 5) ? 0 : parsed;
+    }
+
+    // Helper: Clean Rating Count
+    function cleanRatingCount(val) {
+      if (!val) return 0;
+      const str = String(val).replace(/[^0-9]/g, '');
+      const parsed = parseInt(str, 10);
+      return isNaN(parsed) ? 0 : parsed;
+    }
+
+    // Helper: Parse Category Hierarchy
+    function parseCategory(catStr) {
+      if (!catStr) return { main: 'Other', sub: 'Other', leaf: 'Other' };
+      const parts = catStr.split('|').map(s => s.trim()).filter(Boolean);
+      // Clean readable names
+      const main = formatCategoryName(parts[0] || 'Other');
+      const sub = formatCategoryName(parts[1] || parts[0] || 'Other');
+      const leaf = formatCategoryName(parts[parts.length - 1] || 'Other');
+      return { main, sub, leaf };
+    }
+
+    function formatCategoryName(name) {
+      if (!name) return 'Other';
+      // Replace camel case or joined words with spaces if needed
+      return name.replace(/&/g, ' & ');
+    }
+
+    // Transform Raw Record to Cleaned Model
+    function processRawItem(item) {
+      const actual_price = cleanPrice(item.actual_price);
+      const discounted_price = cleanPrice(item.discounted_price);
+      const discount_pct = cleanDiscount(item.discount_percentage, actual_price, discounted_price);
+      const rating = cleanRating(item.rating);
+      const rating_count = cleanRatingCount(item.rating_count);
+      const cat = parseCategory(item.category);
+      const savings = Math.max(0, actual_price - discounted_price);
+
+      return {
+        id: item.product_id || Math.random().toString(36).substring(7),
+        name: item.product_name || 'Unknown Product',
+        main_category: cat.main,
+        sub_category: cat.sub,
+        leaf_category: cat.leaf,
+        raw_category: item.category || '',
+        actual_price: actual_price,
+        discounted_price: discounted_price,
+        discount_percentage: discount_pct,
+        savings: savings,
+        rating: rating,
+        rating_count: rating_count,
+        img_link: item.img_link || '',
+        product_link: item.product_link || '#'
+      };
+    }
+
+    // --- Init App ---
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      initDataLoading();
+      setupEventListeners();
+    });
+
+    // Try auto-loading amazon.csv via fetch, fallback to sample data
+    async function initDataLoading() {
+      updateStatus("🔍 กำลังตรวจหาไฟล์ amazon.csv ในโฟลเดอร์...", "info");
+
+      try {
+        const response = await fetch('amazon.csv');
+        if (!response.ok) throw new Error('Cannot fetch amazon.csv directly');
+        
+        const csvText = await response.text();
+        parseAndLoadCSVString(csvText, 'amazon.csv (โหลดอัตโนมัติ)');
+      } catch (err) {
+        console.warn('Auto-fetch failed (likely local file:// protocol CORS):', err);
+        // Fallback to sample data
+        if (window.SAMPLE_DATA && window.SAMPLE_DATA.length > 0) {
+          loadDataset(window.SAMPLE_DATA, 'ข้อมูลตัวอย่าง (Sample Mode) - คลิกด้านบนเพื่อเลือก amazon.csv ตัวเต็ม');
+          updateStatus("💡 แสดงข้อมูลตัวอย่างชั่วคราว | เพื่อดูข้อมูลครบ 1,465 รายการ กรุณาคลิกปุ่ม 'เลือกไฟล์ CSV อื่น' หรือลาก amazon.csv มาวาง", "warning");
+        } else {
+          updateStatus("⚠️ ยังไม่ได้โหลดข้อมูล กรุณาเลือกไฟล์ amazon.csv เพื่อเริ่มใช้งาน", "error");
+        }
+      }
+    }
+
+    function loadSampleDataDirectly() {
+      if (window.SAMPLE_DATA) {
+        loadDataset(window.SAMPLE_DATA, 'ข้อมูลตัวอย่าง (Sample Preview)');
+        updateStatus("✅ กำลังแสดงข้อมูลตัวอย่าง (Sample Preview)", "info");
+      }
+    }
+
+    // Setup Event Listeners for File Inputs & Dropzones
+    function setupEventListeners() {
+      const fileInput = document.getElementById('csvFileInput');
+      fileInput.addEventListener('change', handleFileInputSelect);
+
+      const dropInput = document.getElementById('dropZoneInput');
+      dropInput.addEventListener('change', handleFileInputSelect);
+
+      const dropZone = document.getElementById('dropZone');
+      dropZone.addEventListener('click', () => dropInput.click());
+
+      // Drag & Drop handlers
+      ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, preventDefaults, false);
+        document.body.addEventListener(eventName, preventDefaults, false);
+      });
+
+      ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => dropZone.classList.add('border-sky-400', 'bg-sky-950/30'), false);
+      });
+
+      ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => dropZone.classList.remove('border-sky-400', 'bg-sky-950/30'), false);
+      });
+
+      dropZone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        if (files.length > 0) handleFile(files[0]);
+      });
+    }
+
+    function preventDefaults(e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    function handleFileInputSelect(e) {
+      if (e.target.files && e.target.files.length > 0) {
+        handleFile(e.target.files[0]);
+      }
+    }
+
+    function handleFile(file) {
+      if (!file.name.endsWith('.csv')) {
+        alert('กรุณาเลือกไฟล์นามสกุล .csv เท่านั้นครับ');
+        return;
+      }
+      updateStatus(`⏳ กำลังประมวลผลไฟล์ ${file.name}...`, "info");
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        parseAndLoadCSVString(e.target.result, file.name);
+      };
+      reader.readAsText(file);
+    }
+
+    // CSV Parse using PapaParse or fallback parser
+    function parseAndLoadCSVString(csvText, sourceName) {
+      if (window.Papa) {
+        Papa.parse(csvText, {
+          header: true,
+          skipEmptyLines: true,
+          dynamicTyping: false,
+          complete: function(results) {
+            if (results.data && results.data.length > 0) {
+              loadDataset(results.data, sourceName);
+              updateStatus(`✅ โหลดข้อมูลสำเร็จ: ${sourceName} (${results.data.length.toLocaleString()} รายการ)`, "success");
+            } else {
+              alert('ไม่พบข้อมูลในไฟล์ CSV กรุณาตรวจสอบไฟล์');
+            }
+          },
+          error: function(err) {
+            console.error('PapaParse error:', err);
+            fallbackCSVParse(csvText, sourceName);
+          }
+        });
+      } else {
+        fallbackCSVParse(csvText, sourceName);
+      }
+    }
+
+    // Robust Fallback CSV Parser (if CDN is unavailable)
+    function fallbackCSVParse(csvText, sourceName) {
+      const lines = csvText.split(/\r\n|\n/).filter(line => line.trim().length > 0);
+      if (lines.length < 2) return;
+      
+      // Simple regex parser for CSV with quoted fields
+      function parseLine(text) {
+        const regex = /(?:^|,)(?:"([^"]*(?:""[^"]*)*)"|([^",]*))/g;
+        const result = [];
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+          let field = match[1] !== undefined ? match[1].replace(/""/g, '"') : match[2];
+          result.push(field ? field.trim() : '');
+        }
+        return result;
+      }
+
+      const headers = parseLine(lines[0]);
+      const data = [];
+      for (let i = 1; i < lines.length; i++) {
+        const row = parseLine(lines[i]);
+        if (row.length === headers.length) {
+          const item = {};
+          headers.forEach((h, idx) => {
+            item[h] = row[idx];
+          });
+          data.push(item);
+        }
+      }
+      loadDataset(data, sourceName);
+      updateStatus(`✅ โหลดข้อมูลสำเร็จ: ${sourceName} (${data.length.toLocaleString()} รายการ)`, "success");
+    }
+
+    // Load & Initialize Processed Dataset
+    function loadDataset(items, sourceName) {
+      rawDataset = items;
+      processedData = items.map(processRawItem).filter(p => p.name && p.actual_price > 0);
+      
+      // Update Meta stats
+      document.getElementById('metaSource').innerText = sourceName;
+      document.getElementById('metaRows').innerText = processedData.length.toLocaleString();
+      
+      const uniqueCats = getAvailableCategories('main');
+      document.getElementById('metaCategories').innerText = uniqueCats.length;
+
+      // Select default top categories for comparison
+      if (uniqueCats.length > 0) {
+        // Pick first 3-4 top categories by count
+        selectedCategoriesForCompare = uniqueCats.slice(0, Math.min(4, uniqueCats.length));
+      }
+
+      // Populate Filter Category Dropdown
+      populateFilterDropdown();
+
+      // Render Everything
+      renderDashboard();
+    }
+
+    function updateStatus(msg, type = "info") {
+      const banner = document.getElementById('statusBanner');
+      const text = document.getElementById('statusText');
+      banner.style.display = 'flex';
+      text.innerText = msg;
+      
+      if (type === "success") {
+        banner.className = "bg-emerald-950/80 border-b border-emerald-500/40 px-4 py-2 text-xs md:text-sm text-emerald-200 flex items-center justify-between";
+      } else if (type === "warning") {
+        banner.className = "bg-amber-950/80 border-b border-amber-500/40 px-4 py-2 text-xs md:text-sm text-amber-200 flex items-center justify-between";
+      } else {
+        banner.className = "bg-sky-950/80 border-b border-sky-500/40 px-4 py-2 text-xs md:text-sm text-sky-200 flex items-center justify-between";
+      }
+      lucide.createIcons();
+    }
+
+    // Get list of categories at current level sorted by product count
+    function getAvailableCategories(level = activeCategoryLevel) {
+      const catCount = {};
+      processedData.forEach(p => {
+        const cat = level === 'main' ? p.main_category : p.sub_category;
+        catCount[cat] = (catCount[cat] || 0) + 1;
+      });
+      return Object.keys(catCount).sort((a, b) => catCount[b] - catCount[a]);
+    }
+
+    // Set Level: Main or Sub
+    function setCategoryLevel(level) {
+      activeCategoryLevel = level;
+      const mainBtn = document.getElementById('lvlBtn-main');
+      const subBtn = document.getElementById('lvlBtn-sub');
+      
+      if (level === 'main') {
+        mainBtn.className = "px-3 py-1 rounded-lg font-semibold bg-sky-500 text-white shadow transition";
+        subBtn.className = "px-3 py-1 rounded-lg font-medium text-slate-400 hover:text-white transition";
+      } else {
+        subBtn.className = "px-3 py-1 rounded-lg font-semibold bg-sky-500 text-white shadow transition";
+        mainBtn.className = "px-3 py-1 rounded-lg font-medium text-slate-400 hover:text-white transition";
+      }
+
+      // Reset selected categories for the new level
+      const available = getAvailableCategories(level);
+      selectedCategoriesForCompare = available.slice(0, Math.min(4, available.length));
+      
+      renderComparisonTab();
+    }
+
+    // --- Master Render Function ---
+    function renderDashboard() {
+      renderKPICards();
+      renderComparisonTab();
+      renderLeaderboardTab();
+      applyFiltersAndRenderTable();
+      lucide.createIcons();
+    }
+
+    // Render Global KPI Cards
+    function renderKPICards() {
+      if (processedData.length === 0) return;
+
+      const totalItems = processedData.length;
+      const totalDiscountPct = processedData.reduce((acc, p) => acc + p.discount_percentage, 0);
+      const avgDiscount = (totalDiscountPct / totalItems).toFixed(1);
+
+      // Median Discount
+      const sortedDiscounts = [...processedData].map(p => p.discount_percentage).sort((a, b) => a - b);
+      const medianDiscount = sortedDiscounts[Math.floor(sortedDiscounts.length / 2)] || 0;
+
+      // Total Savings
+      const totalSavings = processedData.reduce((acc, p) => acc + p.savings, 0);
+      const avgSavings = (totalSavings / totalItems).toFixed(0);
+
+      // Ratings
+      const ratedItems = processedData.filter(p => p.rating > 0);
+      const avgRating = (ratedItems.reduce((acc, p) => acc + p.rating, 0) / (ratedItems.length || 1)).toFixed(2);
+      const totalReviews = processedData.reduce((acc, p) => acc + p.rating_count, 0);
+
+      // Find top discount category
+      const catStats = calculateCategoryStatistics('main');
+      let topCat = '-';
+      let topCatRate = 0;
+      Object.keys(catStats).forEach(c => {
+        if (catStats[c].count >= 3 && catStats[c].avgDiscount > topCatRate) {
+          topCatRate = catStats[c].avgDiscount;
+          topCat = c;
+        }
+      });
+
+      // Update DOM
+      document.getElementById('kpiTotalProducts').innerText = totalItems.toLocaleString();
+      document.getElementById('kpiCategoryCount').innerText = Object.keys(catStats).length;
+      document.getElementById('kpiAvgDiscount').innerText = avgDiscount + ' %';
+      document.getElementById('kpiMedianDiscount').innerText = medianDiscount + ' %';
+      document.getElementById('kpiTopCategory').innerText = topCat;
+      document.getElementById('kpiTopCategoryRate').innerText = topCatRate.toFixed(1) + '% เฉลี่ย';
+      document.getElementById('kpiAvgSavings').innerText = '₹ ' + Number(avgSavings).toLocaleString();
+      document.getElementById('kpiTotalDiscountValue').innerText = 'ส่วนลดรวม: ₹ ' + (totalSavings >= 1e7 ? (totalSavings/1e7).toFixed(2) + ' Cr' : totalSavings >= 1e5 ? (totalSavings/1e5).toFixed(1) + ' Lakh' : totalSavings.toLocaleString());
+      document.getElementById('kpiAvgRating').innerHTML = `<span>${avgRating}</span> <span class="text-xs font-normal text-slate-400">/ 5.0</span>`;
+      document.getElementById('kpiTotalReviews').innerText = totalReviews.toLocaleString();
+    }
+
+    // Helper: Compute Category Stats
+    function calculateCategoryStatistics(level = activeCategoryLevel) {
+      const stats = {};
+      processedData.forEach(p => {
+        const cat = level === 'main' ? p.main_category : p.sub_category;
+        if (!stats[cat]) {
+          stats[cat] = {
+            name: cat,
+            items: [],
+            count: 0,
+            discountSum: 0,
+            actualPriceSum: 0,
+            discountedPriceSum: 0,
+            savingsSum: 0,
+            ratingSum: 0,
+            ratedCount: 0,
+            reviewCountSum: 0,
+            discounts: []
+          };
+        }
+        stats[cat].items.push(p);
+        stats[cat].count++;
+        stats[cat].discountSum += p.discount_percentage;
+        stats[cat].actualPriceSum += p.actual_price;
+        stats[cat].discountedPriceSum += p.discounted_price;
+        stats[cat].savingsSum += p.savings;
+        stats[cat].reviewCountSum += p.rating_count;
+        stats[cat].discounts.push(p.discount_percentage);
+        if (p.rating > 0) {
+          stats[cat].ratingSum += p.rating;
+          stats[cat].ratedCount++;
+        }
+      });
+
+      // Summarize
+      Object.keys(stats).forEach(c => {
+        const s = stats[c];
+        s.avgDiscount = s.count ? s.discountSum / s.count : 0;
+        s.avgActualPrice = s.count ? s.actualPriceSum / s.count : 0;
+        s.avgDiscountedPrice = s.count ? s.discountedPriceSum / s.count : 0;
+        s.avgSavings = s.count ? s.savingsSum / s.count : 0;
+        s.avgRating = s.ratedCount ? s.ratingSum / s.ratedCount : 0;
+        s.maxDiscount = Math.max(...s.discounts, 0);
+        s.minDiscount = Math.min(...s.discounts, 0);
+        s.discounts.sort((a, b) => a - b);
+        s.medianDiscount = s.discounts[Math.floor(s.discounts.length / 2)] || 0;
+
+        // Tier counts
+        s.tiers = {
+          t0_20: s.items.filter(i => i.discount_percentage <= 20).length,
+          t21_40: s.items.filter(i => i.discount_percentage > 20 && i.discount_percentage <= 40).length,
+          t41_60: s.items.filter(i => i.discount_percentage > 40 && i.discount_percentage <= 60).length,
+          t61_80: s.items.filter(i => i.discount_percentage > 60 && i.discount_percentage <= 80).length,
+          t81_100: s.items.filter(i => i.discount_percentage > 80).length,
+        };
+      });
+
+      return stats;
+    }
+
+    // ====================================================
+    // TAB 1: RENDER COMPARISON STUDIO
+    // ====================================================
+    function renderComparisonTab() {
+      const allCategories = getAvailableCategories(activeCategoryLevel);
+      const catStats = calculateCategoryStatistics(activeCategoryLevel);
+
+      // 1. Render Category Chips
+      const chipsContainer = document.getElementById('categoryChipsContainer');
+      chipsContainer.innerHTML = '';
+
+      allCategories.forEach((cat, idx) => {
+        const isSelected = selectedCategoriesForCompare.includes(cat);
+        const count = catStats[cat] ? catStats[cat].count : 0;
+        const avgD = catStats[cat] ? catStats[cat].avgDiscount.toFixed(0) : 0;
+
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = `px-3 py-1.5 rounded-xl text-xs font-medium border flex items-center gap-1.5 transition ${
+          isSelected 
+            ? 'bg-sky-500/20 text-sky-200 border-sky-400 font-semibold shadow-sm' 
+            : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:border-slate-700 hover:text-slate-200'
+        }`;
+        chip.innerHTML = `
+          <span>${cat}</span>
+          <span class="text-[10px] px-1.5 py-0.2 rounded-md ${isSelected ? 'bg-sky-400/20 text-sky-300' : 'bg-slate-800 text-slate-500'}">
+            ${count} ชิ้น (${avgD}%)
+          </span>
+          ${isSelected ? '<i data-lucide="check" class="w-3 h-3 text-sky-400 ml-0.5"></i>' : ''}
+        `;
+        chip.onclick = () => toggleCategoryComparison(cat);
+        chipsContainer.appendChild(chip);
+      });
+
+      // Filter stats to selected categories
+      const activeStats = selectedCategoriesForCompare.map(c => catStats[c]).filter(Boolean);
+
+      // 2. Render Side-by-Side Metric Cards
+      renderComparisonMetricCards(activeStats);
+
+      // 3. Render Comparison Bar Chart
+      renderCompareBarChart(activeStats);
+
+      // 4. Render Discount Tier Chart
+      renderDiscountTierChart(activeStats);
+
+      // 5. Render Radar Chart
+      renderRadarChart(activeStats);
+
+      // 6. Render Price vs Discount Scatter Chart
+      renderScatterChart(activeStats);
+
+      // 7. Render Top Bargain Spotlight
+      renderTopBargains(activeStats);
+
+      // 8. Render Comparison Table Matrix
+      renderComparisonTableMatrix(activeStats);
+
+      lucide.createIcons();
+    }
+
+    function toggleCategoryComparison(cat) {
+      if (selectedCategoriesForCompare.includes(cat)) {
+        if (selectedCategoriesForCompare.length === 1) {
+          alert('ต้องเลือกอย่างน้อย 1 หมวดหมู่สำหรับการเปรียบเทียบครับ');
+          return;
+        }
+        selectedCategoriesForCompare = selectedCategoriesForCompare.filter(c => c !== cat);
+      } else {
+        selectedCategoriesForCompare.push(cat);
+      }
+      renderComparisonTab();
+    }
+
+    function selectAllCategoriesToCompare() {
+      selectedCategoriesForCompare = getAvailableCategories(activeCategoryLevel);
+      renderComparisonTab();
+    }
+
+    function clearComparisonSelection() {
+      const available = getAvailableCategories(activeCategoryLevel);
+      selectedCategoriesForCompare = available.slice(0, 1);
+      renderComparisonTab();
+    }
+
+    // Render Side-by-Side Metric Cards
+    function renderComparisonMetricCards(activeStats) {
+      const container = document.getElementById('comparisonMetricCards');
+      container.innerHTML = '';
+
+      if (activeStats.length === 0) {
+        container.innerHTML = `<div class="col-span-full text-center py-6 text-slate-500 text-xs">กรุณาเลือกหมวดหมู่อย่างน้อย 1 หมวดหมู่</div>`;
+        return;
+      }
+
+      activeStats.forEach((s, idx) => {
+        const color = categoryColors[idx % categoryColors.length];
+        const card = document.createElement('div');
+        card.className = "glass-card rounded-2xl p-4 border border-slate-800 glass-card-hover relative overflow-hidden flex flex-col justify-between";
+        card.style.borderTopColor = color.solid;
+        card.style.borderTopWidth = '3px';
+
+        card.innerHTML = `
+          <div>
+            <div class="flex items-start justify-between gap-2 mb-2">
+              <span class="font-bold text-sm text-white truncate" title="${s.name}">${s.name}</span>
+              <span class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                ${s.count} รายการ
+              </span>
+            </div>
+
+            <!-- Discount Main Metric -->
+            <div class="bg-slate-900/80 rounded-xl p-3 border border-slate-800/80 mb-3">
+              <div class="text-[11px] text-slate-400 mb-0.5">ส่วนลดเฉลี่ย (Avg Discount)</div>
+              <div class="flex items-baseline gap-2">
+                <span class="text-2xl font-black" style="color: ${color.solid}">${s.avgDiscount.toFixed(1)}%</span>
+                <span class="text-xs text-slate-400">มัธยฐาน: ${s.medianDiscount}%</span>
+              </div>
+              <div class="flex items-center justify-between text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-800">
+                <span>ต่ำสุด: <strong class="text-slate-300">${s.minDiscount}%</strong></span>
+                <span>สูงสุด: <strong class="text-rose-400">${s.maxDiscount}%</strong></span>
+              </div>
+            </div>
+
+            <!-- Price & Savings Details -->
+            <div class="space-y-1.5 text-xs text-slate-300">
+              <div class="flex justify-between">
+                <span class="text-slate-400">ราคาเดิมเฉลี่ย:</span>
+                <span class="font-medium text-slate-300">₹ ${s.avgActualPrice.toFixed(0)}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-400">ราคาลดเฉลี่ย:</span>
+                <span class="font-bold text-sky-400">₹ ${s.avgDiscountedPrice.toFixed(0)}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-slate-400">ประหยัดเฉลี่ย:</span>
+                <span class="font-bold text-emerald-400">₹ ${s.avgSavings.toFixed(0)}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Rating & Reviews -->
+          <div class="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+            <span class="flex items-center gap-1 text-amber-300 font-semibold">
+              <i data-lucide="star" class="w-3 h-3 fill-amber-400 text-amber-400"></i>
+              ${s.avgRating.toFixed(2)} / 5.0
+            </span>
+            <span>${s.reviewCountSum.toLocaleString()} รีวิว</span>
+          </div>
+        `;
+
+        container.appendChild(card);
+      });
+    }
+
+    // Chart 1: Average & Max Discount Bar Chart
+    function renderCompareBarChart(activeStats) {
+      const ctx = document.getElementById('categoryDiscountBarChart').getContext('2d');
+      if (charts.compareBar) charts.compareBar.destroy();
+
+      const labels = activeStats.map(s => s.name.length > 20 ? s.name.substring(0, 18) + '...' : s.name);
+      const avgData = activeStats.map(s => Number(s.avgDiscount.toFixed(1)));
+      const maxData = activeStats.map(s => s.maxDiscount);
+
+      charts.compareBar = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'ส่วนลดเฉลี่ย (%)',
+              data: avgData,
+              backgroundColor: activeStats.map((_, i) => categoryColors[i % categoryColors.length].solid),
+              borderRadius: 6,
+              barPercentage: 0.6
+            },
+            {
+              label: 'ส่วนลดสูงสุด (%)',
+              data: maxData,
+              backgroundColor: 'rgba(244, 63, 94, 0.4)',
+              borderColor: '#f43f5e',
+              borderWidth: 1,
+              borderRadius: 6,
+              barPercentage: 0.6
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'top',
+              labels: { color: '#94a3b8', font: { size: 11 } }
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` ${ctx.dataset.label}: ${ctx.raw}%`
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { color: '#94a3b8', font: { size: 10 } },
+              grid: { display: false }
+            },
+            y: {
+              min: 0,
+              max: 100,
+              ticks: { color: '#94a3b8', callback: v => v + '%' },
+              grid: { color: 'rgba(255, 255, 255, 0.05)' }
+            }
+          }
+        }
+      });
+    }
+
+    // Chart 2: Discount Tiers (Stacked Bar)
+    function renderDiscountTierChart(activeStats) {
+      const ctx = document.getElementById('discountTierChart').getContext('2d');
+      if (charts.tierBar) charts.tierBar.destroy();
+
+      const labels = activeStats.map(s => s.name.length > 18 ? s.name.substring(0, 16) + '...' : s.name);
+      
+      // Calculate percentages for each tier
+      const t0_20 = activeStats.map(s => ((s.tiers.t0_20 / (s.count || 1)) * 100).toFixed(1));
+      const t21_40 = activeStats.map(s => ((s.tiers.t21_40 / (s.count || 1)) * 100).toFixed(1));
+      const t41_60 = activeStats.map(s => ((s.tiers.t41_60 / (s.count || 1)) * 100).toFixed(1));
+      const t61_80 = activeStats.map(s => ((s.tiers.t61_80 / (s.count || 1)) * 100).toFixed(1));
+      const t81_100 = activeStats.map(s => ((s.tiers.t81_100 / (s.count || 1)) * 100).toFixed(1));
+
+      charts.tierBar = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            { label: '0-20% (ลดน้อย)', data: t0_20, backgroundColor: '#64748b' },
+            { label: '21-40% (ปานกลาง)', data: t21_40, backgroundColor: '#0284c7' },
+            { label: '41-60% (สูง)', data: t41_60, backgroundColor: '#38bdf8' },
+            { label: '61-80% (สูงมาก)', data: t61_80, backgroundColor: '#f59e0b' },
+            { label: '81-100% (ลดกระหน่ำ)', data: t81_100, backgroundColor: '#f43f5e' }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              stacked: true,
+              ticks: { color: '#94a3b8', font: { size: 10 } },
+              grid: { display: false }
+            },
+            y: {
+              stacked: true,
+              max: 100,
+              ticks: { color: '#94a3b8', callback: v => v + '%' },
+              grid: { color: 'rgba(255, 255, 255, 0.05)' }
+            }
+          },
+          plugins: {
+            legend: {
+              position: 'top',
+              labels: { color: '#94a3b8', font: { size: 10 }, boxWidth: 10 }
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` ${ctx.dataset.label}: ${ctx.raw}% ของสินค้าในหมวด`
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Chart 3: Radar Spider Chart
+    function renderRadarChart(activeStats) {
+      const ctx = document.getElementById('categoryRadarChart').getContext('2d');
+      if (charts.radar) charts.radar.destroy();
+
+      if (activeStats.length === 0) return;
+
+      // Normalize dimensions across all active categories to 0-100 scale
+      const maxDisc = Math.max(...activeStats.map(s => s.avgDiscount), 1);
+      const maxRate = 5.0;
+      const maxPrice = Math.max(...activeStats.map(s => s.avgActualPrice), 1);
+      const maxCount = Math.max(...activeStats.map(s => s.count), 1);
+      const maxReviews = Math.max(...activeStats.map(s => s.reviewCountSum), 1);
+
+      const datasets = activeStats.slice(0, 5).map((s, idx) => {
+        const c = categoryColors[idx % categoryColors.length];
+        return {
+          label: s.name,
+          data: [
+            Math.round((s.avgDiscount / maxDisc) * 100),
+            Math.round((s.avgRating / maxRate) * 100),
+            Math.round((s.avgActualPrice / maxPrice) * 100),
+            Math.round((s.count / maxCount) * 100),
+            Math.round((s.reviewCountSum / maxReviews) * 100)
+          ],
+          borderColor: c.solid,
+          backgroundColor: c.bg,
+          pointBackgroundColor: c.solid,
+          pointBorderColor: '#fff',
+          borderWidth: 2
+        };
+      });
+
+      charts.radar = new Chart(ctx, {
+        type: 'radar',
+        data: {
+          labels: ['อัตราส่วนลด (%)', 'คะแนนความพึงพอใจ', 'ระดับราคาเฉลี่ย', 'ความหลากหลายสินค้า', 'ยอดรีวิวสะสม'],
+          datasets: datasets
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'top',
+              labels: { color: '#94a3b8', font: { size: 10 }, boxWidth: 10 }
+            }
+          },
+          scales: {
+            r: {
+              angleLines: { color: 'rgba(255, 255, 255, 0.08)' },
+              grid: { color: 'rgba(255, 255, 255, 0.08)' },
+              pointLabels: { color: '#cbd5e1', font: { size: 10 } },
+              ticks: { display: false, max: 100 }
+            }
+          }
+        }
+      });
+    }
+
+    // Chart 4: Price vs Discount Scatter Chart
+    function renderScatterChart(activeStats) {
+      const ctx = document.getElementById('priceDiscountScatterChart').getContext('2d');
+      if (charts.scatter) charts.scatter.destroy();
+
+      if (activeStats.length === 0) return;
+
+      const datasets = activeStats.map((s, idx) => {
+        const c = categoryColors[idx % categoryColors.length];
+        return {
+          label: s.name,
+          data: s.items.map(p => ({
+            x: p.actual_price,
+            y: p.discount_percentage,
+            title: p.name,
+            rating: p.rating,
+            salePrice: p.discounted_price
+          })),
+          backgroundColor: c.bg,
+          borderColor: c.solid,
+          borderWidth: 1.5,
+          pointRadius: 4,
+          pointHoverRadius: 7
+        };
+      });
+
+      charts.scatter = new Chart(ctx, {
+        type: 'scatter',
+        data: { datasets: datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'top',
+              labels: { color: '#94a3b8', font: { size: 10 } }
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  const p = ctx.raw;
+                  return [
+                    ` สินค้า: ${p.title ? p.title.substring(0, 45) + '...' : ''}`,
+                    ` ราคาเดิม: ₹${p.x.toLocaleString()} -> ลดเหลือ: ₹${p.salePrice.toLocaleString()}`,
+                    ` ส่วนลด: ${p.y}% | คะแนน: ${p.rating}★`
+                  ];
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              title: { display: true, text: 'Actual Price (₹)', color: '#94a3b8', font: { size: 11 } },
+              ticks: { color: '#94a3b8', callback: v => '₹' + v.toLocaleString() },
+              grid: { color: 'rgba(255, 255, 255, 0.05)' }
+            },
+            y: {
+              title: { display: true, text: 'Discount Percentage (%)', color: '#94a3b8', font: { size: 11 } },
+              min: 0,
+              max: 100,
+              ticks: { color: '#94a3b8', callback: v => v + '%' },
+              grid: { color: 'rgba(255, 255, 255, 0.05)' }
+            }
+          }
+        }
+      });
+    }
+
+    // Top Bargains per Category
+    function renderTopBargains(activeStats) {
+      const container = document.getElementById('topBargainsGrid');
+      container.innerHTML = '';
+
+      if (activeStats.length === 0) return;
+
+      activeStats.forEach((s, idx) => {
+        // Find best deal in this category
+        const sorted = [...s.items].sort((a, b) => b.discount_percentage - a.discount_percentage);
+        const topItem = sorted[0];
+        if (!topItem) return;
+
+        const card = document.createElement('div');
+        card.className = "bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex flex-col justify-between glass-card-hover relative overflow-hidden";
+        
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between text-[10px] text-slate-400 mb-2">
+              <span class="font-bold text-sky-400 truncate max-w-[140px]">${s.name}</span>
+              <span class="px-2 py-0.5 rounded-full font-black bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                -${topItem.discount_percentage}% OFF
+              </span>
+            </div>
+
+            <div class="flex gap-3 items-center mb-2">
+              <img src="${topItem.img_link || 'https://via.placeholder.com/60?text=Amazon'}" 
+                   onerror="this.src='https://via.placeholder.com/60?text=Product'"
+                   class="w-12 h-12 object-contain rounded-lg bg-slate-950 p-1 border border-slate-800 shrink-0" 
+                   alt="thumb">
+              <div class="min-w-0 flex-1">
+                <a href="${topItem.product_link}" target="_blank" class="text-xs font-semibold text-white hover:text-sky-400 transition line-clamp-2" title="${topItem.name}">
+                  ${topItem.name}
+                </a>
+              </div>
+            </div>
+
+            <div class="flex items-baseline justify-between mt-2 pt-2 border-t border-slate-800">
+              <div class="space-x-1.5">
+                <span class="text-sm font-bold text-emerald-400">₹ ${topItem.discounted_price.toLocaleString()}</span>
+                <span class="text-[11px] text-slate-500 line-through">₹ ${topItem.actual_price.toLocaleString()}</span>
+              </div>
+              <span class="text-[11px] font-semibold text-amber-300 flex items-center gap-0.5">
+                ${topItem.rating} <i data-lucide="star" class="w-3 h-3 fill-amber-400 text-amber-400"></i>
+              </span>
+            </div>
+          </div>
+        `;
+
+        container.appendChild(card);
+      });
+    }
+
+    // Direct Head-to-Head Comparison Matrix Table
+    function renderComparisonTableMatrix(activeStats) {
+      const tbody = document.getElementById('comparisonTableBody');
+      tbody.innerHTML = '';
+
+      if (activeStats.length === 0) return;
+
+      activeStats.forEach((s, idx) => {
+        const color = categoryColors[idx % categoryColors.length];
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-800/40 transition border-b border-slate-800/40";
+        
+        tr.innerHTML = `
+          <td class="p-3 font-semibold text-white flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color: ${color.solid}"></span>
+            <span class="truncate max-w-xs" title="${s.name}">${s.name}</span>
+          </td>
+          <td class="p-3 text-right text-slate-300 font-bold">${s.count.toLocaleString()}</td>
+          <td class="p-3 text-right">
+            <span class="px-2 py-0.5 rounded-md font-bold" style="background: ${color.bg}; color: ${color.solid}">
+              ${s.avgDiscount.toFixed(1)}%
+            </span>
+          </td>
+          <td class="p-3 text-right text-slate-300">${s.medianDiscount}%</td>
+          <td class="p-3 text-right text-rose-400 font-bold">${s.maxDiscount}%</td>
+          <td class="p-3 text-right text-slate-400">₹ ${s.avgActualPrice.toFixed(0)}</td>
+          <td class="p-3 text-right text-sky-300 font-semibold">₹ ${s.avgDiscountedPrice.toFixed(0)}</td>
+          <td class="p-3 text-right text-emerald-400 font-bold">₹ ${s.avgSavings.toFixed(0)}</td>
+          <td class="p-3 text-right text-amber-300 font-bold">${s.avgRating.toFixed(2)} ★</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // ====================================================
+    // TAB 2: LEADERBOARD & DEEP ANALYTICS
+    // ====================================================
+    function renderLeaderboardTab() {
+      const catStats = calculateCategoryStatistics('main');
+      const sortedCategories = Object.keys(catStats).sort((a, b) => catStats[b].avgDiscount - catStats[a].avgDiscount);
+
+      // 1. All Categories Ranking Bar Chart
+      const rankingCtx = document.getElementById('allCategoriesRankingChart').getContext('2d');
+      if (charts.allRanking) charts.allRanking.destroy();
+
+      charts.allRanking = new Chart(rankingCtx, {
+        type: 'bar',
+        data: {
+          labels: sortedCategories,
+          datasets: [{
+            label: 'ส่วนลดเฉลี่ย (%)',
+            data: sortedCategories.map(c => Number(catStats[c].avgDiscount.toFixed(1))),
+            backgroundColor: sortedCategories.map((_, i) => categoryColors[i % categoryColors.length].solid),
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: 'y',
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` ส่วนลดเฉลี่ย: ${ctx.raw}% (${catStats[sortedCategories[ctx.dataIndex]].count} สินค้า)`
+              }
+            }
+          },
+          scales: {
+            x: {
+              min: 0,
+              max: 100,
+              ticks: { color: '#94a3b8', callback: v => v + '%' },
+              grid: { color: 'rgba(255, 255, 255, 0.05)' }
+            },
+            y: {
+              ticks: { color: '#f1f5f9', font: { size: 11, weight: '500' } },
+              grid: { display: false }
+            }
+          }
+        }
+      });
+
+      // 2. Price Range vs Discount Rate
+      const priceTiers = [
+        { label: '< ₹500 (ราคาประหยัด)', min: 0, max: 500 },
+        { label: '₹500 - ₹2,000 (ระดับกลาง)', min: 500, max: 2000 },
+        { label: '₹2,000 - ₹10,000 (พรีเมียม)', min: 2000, max: 10000 },
+        { label: '> ₹10,000 (ไฮเอนด์)', min: 10000, max: Infinity }
+      ];
+
+      const priceTierStats = priceTiers.map(t => {
+        const items = processedData.filter(p => p.actual_price >= t.min && p.actual_price < t.max);
+        const avg = items.length ? items.reduce((a, b) => a + b.discount_percentage, 0) / items.length : 0;
+        return { label: t.label, avg: Number(avg.toFixed(1)), count: items.length };
+      });
+
+      const priceCtx = document.getElementById('priceRangeDiscountChart').getContext('2d');
+      if (charts.priceTier) charts.priceTier.destroy();
+
+      charts.priceTier = new Chart(priceCtx, {
+        type: 'bar',
+        data: {
+          labels: priceTierStats.map(p => p.label),
+          datasets: [{
+            label: 'ส่วนลดเฉลี่ย (%)',
+            data: priceTierStats.map(p => p.avg),
+            backgroundColor: ['#38bdf8', '#0ea5e9', '#0284c7', '#0369a1'],
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` ส่วนลดเฉลี่ย: ${ctx.raw}% (${priceTierStats[ctx.dataIndex].count} สินค้า)`
+              }
+            }
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { display: false } },
+            y: { min: 0, max: 100, ticks: { color: '#94a3b8', callback: v => v + '%' }, grid: { color: 'rgba(255, 255, 255, 0.05)' } }
+          }
+        }
+      });
+
+      // 3. Rating vs Discount Correlation (Grouping by rating tiers)
+      const ratingTiers = [
+        { label: '3.0 - 3.5 ★', min: 3.0, max: 3.5 },
+        { label: '3.6 - 4.0 ★', min: 3.6, max: 4.0 },
+        { label: '4.1 - 4.4 ★', min: 4.1, max: 4.4 },
+        { label: '4.5 - 5.0 ★', min: 4.5, max: 5.0 }
+      ];
+
+      const ratingStats = ratingTiers.map(t => {
+        const items = processedData.filter(p => p.rating >= t.min && p.rating <= t.max);
+        const avgD = items.length ? items.reduce((a, b) => a + b.discount_percentage, 0) / items.length : 0;
+        return { label: t.label, avgDiscount: Number(avgD.toFixed(1)), count: items.length };
+      });
+
+      const ratingCtx = document.getElementById('ratingVsDiscountChart').getContext('2d');
+      if (charts.ratingCorr) charts.ratingCorr.destroy();
+
+      charts.ratingCorr = new Chart(ratingCtx, {
+        type: 'line',
+        data: {
+          labels: ratingStats.map(r => r.label),
+          datasets: [{
+            label: 'ส่วนลดเฉลี่ย (%)',
+            data: ratingStats.map(r => r.avgDiscount),
+            borderColor: '#a855f7',
+            backgroundColor: 'rgba(168, 85, 247, 0.2)',
+            fill: true,
+            tension: 0.3,
+            pointBackgroundColor: '#a855f7',
+            pointRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ` ส่วนลดเฉลี่ย: ${ctx.raw}% (${ratingStats[ctx.dataIndex].count} สินค้า)`
+              }
+            }
+          },
+          scales: {
+            x: { ticks: { color: '#94a3b8' }, grid: { display: false } },
+            y: { min: 0, max: 100, ticks: { color: '#94a3b8', callback: v => v + '%' }, grid: { color: 'rgba(255, 255, 255, 0.05)' } }
+          }
+        }
+      });
+    }
+
+    // ====================================================
+    // TAB 3: PRODUCT EXPLORER & FILTER STUDIO
+    // ====================================================
+    function populateFilterDropdown() {
+      const select = document.getElementById('filterCategory');
+      select.innerHTML = '<option value="ALL">ทั้งหมด (All Categories)</option>';
+      
+      const cats = getAvailableCategories('main');
+      cats.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.innerText = c;
+        select.appendChild(opt);
+      });
+    }
+
+    function resetFilters() {
+      document.getElementById('filterSearch').value = '';
+      document.getElementById('filterCategory').value = 'ALL';
+      document.getElementById('filterDiscountMin').value = 0;
+      document.getElementById('filterDiscountVal').innerText = '0%';
+      document.getElementById('filterRatingMin').value = 0;
+      document.getElementById('filterRatingVal').innerText = '0.0 ★';
+      document.getElementById('tableSortBy').value = 'discount_desc';
+      currentPage = 1;
+      applyFiltersAndRenderTable();
+    }
+
+    function applyFiltersAndRenderTable() {
+      const search = document.getElementById('filterSearch').value.toLowerCase().trim();
+      const selectedCat = document.getElementById('filterCategory').value;
+      const minDiscount = parseFloat(document.getElementById('filterDiscountMin').value) || 0;
+      const minRating = parseFloat(document.getElementById('filterRatingMin').value) || 0;
+      const sortBy = document.getElementById('tableSortBy').value;
+
+      // Filter products
+      currentFilteredProducts = processedData.filter(p => {
+        if (search && !p.name.toLowerCase().includes(search) && !p.raw_category.toLowerCase().includes(search)) return false;
+        if (selectedCat !== 'ALL' && p.main_category !== selectedCat && p.sub_category !== selectedCat) return false;
+        if (p.discount_percentage < minDiscount) return false;
+        if (p.rating < minRating) return false;
+        return true;
+      });
+
+      // Sort
+      currentFilteredProducts.sort((a, b) => {
+        if (sortBy === 'discount_desc') return b.discount_percentage - a.discount_percentage;
+        if (sortBy === 'discount_asc') return a.discount_percentage - b.discount_percentage;
+        if (sortBy === 'price_asc') return a.discounted_price - b.discounted_price;
+        if (sortBy === 'price_desc') return b.discounted_price - a.discounted_price;
+        if (sortBy === 'rating_desc') return b.rating - a.rating;
+        if (sortBy === 'reviews_desc') return b.rating_count - a.rating_count;
+        return 0;
+      });
+
+      // Update badge
+      document.getElementById('filteredCountBadge').innerText = `${currentFilteredProducts.length.toLocaleString()} รายการ`;
+
+      // Render Page
+      renderTablePage();
+    }
+
+    function renderTablePage() {
+      const tbody = document.getElementById('productTableBody');
+      tbody.innerHTML = '';
+
+      const totalItems = currentFilteredProducts.length;
+      const maxPages = Math.max(1, Math.ceil(totalItems / pageSize));
+      if (currentPage > maxPages) currentPage = maxPages;
+
+      const startIdx = (currentPage - 1) * pageSize;
+      const endIdx = Math.min(startIdx + pageSize, totalItems);
+      const pageItems = currentFilteredProducts.slice(startIdx, endIdx);
+
+      // Pagination DOM
+      document.getElementById('paginationInfo').innerText = totalItems === 0 
+        ? 'ไม่พบสินค้าที่ตรงเงื่อนไข' 
+        : `แสดง ${startIdx + 1} - ${endIdx} จากทั้งหมด ${totalItems.toLocaleString()} รายการ`;
+      document.getElementById('currentPageDisplay').innerText = `หน้า ${currentPage} / ${maxPages}`;
+      document.getElementById('btnPrevPage').disabled = currentPage <= 1;
+      document.getElementById('btnNextPage').disabled = currentPage >= maxPages;
+
+      if (pageItems.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" class="text-center py-8 text-slate-500">ไม่พบสินค้าที่ตรงตามเงื่อนไข ลองลดตัวกรองลงดูครับ</td></tr>`;
+        return;
+      }
+
+      pageItems.forEach(p => {
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-800/50 transition border-b border-slate-800/40";
+
+        // Discount badge styling
+        let discountBadgeClass = 'bg-slate-800 text-slate-300 border-slate-700';
+        if (p.discount_percentage >= 70) discountBadgeClass = 'bg-rose-500/20 text-rose-300 border-rose-500/40 font-bold';
+        else if (p.discount_percentage >= 40) discountBadgeClass = 'bg-amber-500/20 text-amber-300 border-amber-500/40 font-semibold';
+        else if (p.discount_percentage > 0) discountBadgeClass = 'bg-sky-500/20 text-sky-300 border-sky-500/40';
+
+        tr.innerHTML = `
+          <td class="p-2.5 text-center">
+            <img src="${p.img_link || 'https://via.placeholder.com/40'}" 
+                 onerror="this.src='https://via.placeholder.com/40?text=Item'"
+                 class="w-10 h-10 object-contain rounded-lg bg-slate-900 border border-slate-800 mx-auto" 
+                 alt="thumb">
+          </td>
+          <td class="p-2.5 max-w-xs">
+            <a href="${p.product_link}" target="_blank" class="font-medium text-white hover:text-sky-400 line-clamp-2 transition" title="${p.name}">
+              ${p.name}
+            </a>
+          </td>
+          <td class="p-2.5 text-slate-400">
+            <div class="font-semibold text-slate-300 truncate max-w-[140px]">${p.main_category}</div>
+            <div class="text-[10px] text-slate-500 truncate max-w-[140px]">${p.sub_category}</div>
+          </td>
+          <td class="p-2.5 text-right text-slate-400 line-through">
+            ₹ ${p.actual_price.toLocaleString()}
+          </td>
+          <td class="p-2.5 text-right font-bold text-sky-300">
+            ₹ ${p.discounted_price.toLocaleString()}
+          </td>
+          <td class="p-2.5 text-center">
+            <span class="inline-block px-2 py-0.5 rounded-full text-xs border ${discountBadgeClass}">
+              ${p.discount_percentage}%
+            </span>
+          </td>
+          <td class="p-2.5 text-center font-medium text-amber-300">
+            ${p.rating > 0 ? p.rating + ' ★' : '-'}
+            <div class="text-[10px] text-slate-500">${p.rating_count ? p.rating_count.toLocaleString() + ' รีวิว' : ''}</div>
+          </td>
+          <td class="p-2.5 text-center">
+            <a href="${p.product_link}" target="_blank" class="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white transition" title="เปิดดูบน Amazon">
+              <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+            </a>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+
+      lucide.createIcons();
+    }
+
+    function prevPage() {
+      if (currentPage > 1) {
+        currentPage--;
+        renderTablePage();
+      }
+    }
+
+    function nextPage() {
+      const maxPages = Math.ceil(currentFilteredProducts.length / pageSize);
+      if (currentPage < maxPages) {
+        currentPage++;
+        renderTablePage();
+      }
+    }
+
+    // ====================================================
+    // TAB SWITCHER
+    // ====================================================
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active', 'border-sky-400', 'text-sky-400', 'bg-sky-500/10');
+        btn.classList.add('border-transparent', 'text-slate-400');
+      });
+
+      document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.add('hidden');
+      });
+
+      const activeBtn = document.getElementById(`tabBtn-${tabId}`);
+      if (activeBtn) {
+        activeBtn.classList.add('active', 'border-sky-400', 'text-sky-400', 'bg-sky-500/10');
+        activeBtn.classList.remove('border-transparent', 'text-slate-400');
+      }
+
+      const activeContent = document.getElementById(`tabContent-${tabId}`);
+      if (activeContent) {
+        activeContent.classList.remove('hidden');
+      }
+
+      // Re-trigger icon creation
+      lucide.createIcons();
+    }
+
+    // ====================================================
+    // EXPORT FILTERED DATA AS CSV
+    // ====================================================
+    function exportCurrentDataCSV() {
+      if (!currentFilteredProducts || currentFilteredProducts.length === 0) {
+        alert('ไม่มีข้อมูลสำหรับส่งออก');
+        return;
+      }
+
+      let csv = 'Product ID,Product Name,Main Category,Sub Category,Actual Price (INR),Discounted Price (INR),Discount Percentage,Savings (INR),Rating,Rating Count,Product Link\n';
+      
+      currentFilteredProducts.forEach(p => {
+        const cleanName = `"${(p.name || '').replace(/"/g, '""')}"`;
+        const row = [
+          p.id,
+          cleanName,
+          `"${p.main_category}"`,
+          `"${p.sub_category}"`,
+          p.actual_price,
+          p.discounted_price,
+          p.discount_percentage,
+          p.savings,
+          p.rating,
+          p.rating_count,
+          `"${p.product_link}"`
+        ];
+        csv += row.join(',') + '\n';
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `amazon_sales_analysis_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  </script>
+</body>
+</html>
